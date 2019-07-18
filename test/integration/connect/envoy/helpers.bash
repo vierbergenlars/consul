@@ -293,6 +293,36 @@ function wait_for_config_entry {
   retry_default read_config_entry $KIND $NAME >/dev/null
 }
 
+function delete_config_entry {
+  local KIND=$1
+  local NAME=$2
+  retry_default curl -sL -XDELETE "http://127.0.0.1:8500/v1/config/${KIND}/${NAME}"
+}
+
+function wait_for_agent_service_register {
+  local SERVICE_ID=$1
+  retry_default curl -sLf "http://127.0.0.1:8500/v1/agent/service/${SERVICE_ID}" >/dev/null
+}
+
+function set_ttl_check_state {
+  local CHECK_ID=$1
+  local CHECK_STATE=$2
+
+  case "$CHECK_STATE" in
+    pass)
+      ;;
+    warn)
+      ;;
+    fail)
+      ;;
+    *)
+      echo "invalid ttl check state '${CHECK_STATE}'" >&2
+      return 1
+  esac
+
+  retry_default curl -sL -XPUT "http://localhost:8500/v1/agent/check/warn/${CHECK_ID}"
+}
+
 function get_upstream_fortio_name {
   run retry_default curl -v -s -f localhost:5000/debug?env=dump
   [ "$status" == 0 ]
