@@ -191,6 +191,10 @@ function docker_wget {
   docker run -ti --rm --network container:envoy_consul_1 alpine:3.9 wget $@
 }
 
+function docker_curl {
+  docker run -ti --rm --network container:envoy_consul_1 --entrypoint curl consul-dev $@
+}
+
 function get_envoy_pid {
   local BOOTSTRAP_NAME=$1
   run ps aux
@@ -301,7 +305,7 @@ function delete_config_entry {
 
 function wait_for_agent_service_register {
   local SERVICE_ID=$1
-  retry_default curl -sLf "http://127.0.0.1:8500/v1/agent/service/${SERVICE_ID}" >/dev/null
+  retry_default docker_curl -sLf "http://127.0.0.1:8500/v1/agent/service/${SERVICE_ID}" >/dev/null
 }
 
 function set_ttl_check_state {
@@ -320,7 +324,7 @@ function set_ttl_check_state {
       return 1
   esac
 
-  retry_default curl -sL -XPUT "http://localhost:8500/v1/agent/check/warn/${CHECK_ID}"
+  retry_default docker_curl -sL -XPUT "http://localhost:8500/v1/agent/check/warn/${CHECK_ID}"
 }
 
 function get_upstream_fortio_name {
