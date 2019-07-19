@@ -6,7 +6,6 @@ import (
 
 	metrics "github.com/armon/go-metrics"
 	"github.com/hashicorp/consul/acl"
-	"github.com/hashicorp/consul/agent/discoverychain"
 	"github.com/hashicorp/consul/agent/consul/state"
 	"github.com/hashicorp/consul/agent/structs"
 	memdb "github.com/hashicorp/go-memdb"
@@ -314,51 +313,38 @@ func (c *ConfigEntry) ResolveServiceConfig(args *structs.ServiceConfigRequest, r
 		})
 }
 
-func (c *ConfigEntry) ReadDiscoveryChain(args *structs.DiscoveryChainRequest, reply *structs.DiscoveryChainResponse) error {
-	if done, err := c.srv.forward("ConfigEntry.ReadDiscoveryChain", args, args, reply); done {
+func (c *ConfigEntry) ListRelated(args *structs.RelatedConfigEntryQuery, reply *structs.IndexedGenericConfigEntries) error {
+	if done, err := c.srv.forward("ConfigEntry.ListRelated", args, args, reply); done {
 		return err
 	}
-	defer metrics.MeasureSince([]string{"config_entry", "read_discovery_chain"}, time.Now())
+	defer metrics.MeasureSince([]string{"config_entry", "list_related"}, time.Now())
+
+	// For now there's only one kind of query you can make.
+	if args.ServiceName == "" {
+		return fmt.Errorf("Must provide service name")
+	}
 
 	// Fetch the ACL token, if any.
 	rule, err := c.srv.ResolveToken(args.Token)
 	if err != nil {
 		return err
 	}
-	if rule != nil && !rule.ServiceRead(args.Name) {
+	if rule != nil && !rule.ServiceRead(args.ServiceName) {
 		return acl.ErrPermissionDenied
 	}
-
-	if args.Name == "" {
-		return fmt.Errorf("Must provide service name")
-	}
-
-	const currentNamespace = "default"
 
 	return c.srv.blockingQuery(
 		&args.QueryOptions,
 		&reply.QueryMeta,
 		func(ws memdb.WatchSet, state *state.Store) error {
-			index, entries, err := state.ReadDiscoveryChainConfigEntries(ws, args.Name)
-			if err != nil {
-				return err
-			}
-
-			// Then we compile it into something useful.
-			chain, err := discoverychain.Compile(discoverychain.CompileRequest{
-				ServiceName:       args.Name,
-				CurrentNamespace:  currentNamespace,
-				CurrentDatacenter: c.srv.config.Datacenter,
-				InferDefaults:     true,
-				Entries:           entries,
-			})
+			index, entries, err := state.ReadDiscoveryChainConfigEntries(ws, args.ServiceName)
 			if err != nil {
 				return err
 			}
 
 			reply.Index = index
-			reply.ConfigEntries = entries
-			reply.Chain = chain
+			// TODO(rb): change the state store to just directly return this?
+			reply.Entries = entries.ToSlice()
 
 			return nil
 		})

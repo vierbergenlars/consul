@@ -860,6 +860,35 @@ func NewDiscoveryChainConfigEntries() *DiscoveryChainConfigEntries {
 	}
 }
 
+// Len returns the total count of config entries represented here.
+func (e *DiscoveryChainConfigEntries) Len() int {
+	sum := len(e.Routers) + len(e.Splitters) + len(e.Resolvers) + len(e.Services)
+	if e.GlobalProxy != nil {
+		sum++
+	}
+	return sum
+}
+
+func (e *DiscoveryChainConfigEntries) ToSlice() []ConfigEntry {
+	out := make([]ConfigEntry, 0, e.Len())
+	for _, entry := range e.Routers {
+		out = append(out, entry)
+	}
+	for _, entry := range e.Splitters {
+		out = append(out, entry)
+	}
+	for _, entry := range e.Resolvers {
+		out = append(out, entry)
+	}
+	for _, entry := range e.Services {
+		out = append(out, entry)
+	}
+	if e.GlobalProxy != nil {
+		out = append(out, e.GlobalProxy)
+	}
+	return out
+}
+
 func (e *DiscoveryChainConfigEntries) GetRouter(name string) *ServiceRouterConfigEntry {
 	if e.Routers != nil {
 		return e.Routers[name]

@@ -141,10 +141,12 @@ func TestManager_BasicLifecycle(t *testing.T) {
 		},
 	})
 
-	dbChainCacheKey := testGenCacheKey(&structs.DiscoveryChainRequest{
-		Datacenter:   "dc1",
-		QueryOptions: structs.QueryOptions{Token: "my-token"},
-		Name:         "db",
+	dbChainCacheKey := testGenCacheKey(&cachetype.DiscoveryChainRequest{
+		Datacenter:           "dc1",
+		QueryOptions:         structs.QueryOptions{Token: "my-token"},
+		ServiceName:          "db",
+		EvaluateInDatacenter: "dc1",
+		EvaluateInNamespace:  "default",
 	})
 
 	dbHealthCacheKey := testGenCacheKey(&structs.ServiceSpecificRequest{
@@ -179,7 +181,7 @@ func TestManager_BasicLifecycle(t *testing.T) {
 				types.health.Set(dbHealthCacheKey, &structs.IndexedCheckServiceNodes{
 					Nodes: TestUpstreamNodes(t),
 				})
-				types.compiledChain.Set(dbChainCacheKey, &structs.DiscoveryChainResponse{
+				types.compiledChain.Set(dbChainCacheKey, &cachetype.DiscoveryChainResponse{
 					Chain: dbDefaultChain(),
 				})
 			},
@@ -218,7 +220,7 @@ func TestManager_BasicLifecycle(t *testing.T) {
 				types.health.Set(db_v2_HealthCacheKey, &structs.IndexedCheckServiceNodes{
 					Nodes: TestUpstreamNodesAlternate(t),
 				})
-				types.compiledChain.Set(dbChainCacheKey, &structs.DiscoveryChainResponse{
+				types.compiledChain.Set(dbChainCacheKey, &cachetype.DiscoveryChainResponse{
 					Chain: dbSplitChain(),
 				})
 			},

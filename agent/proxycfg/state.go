@@ -224,12 +224,19 @@ func (s *state) initWatchesConnectProxy() error {
 		return err
 	}
 
+	const currentNamespace = "default"
+
 	// Watch for updates to service endpoints for all upstreams
 	for _, u := range s.proxyCfg.Upstreams {
 		dc := s.source.Datacenter
 		if u.Datacenter != "" {
 			// TODO(rb): if we ASK for a specific datacenter, do we still use the chain?
 			dc = u.Datacenter
+		}
+
+		ns := currentNamespace
+		if u.DestinationNamespace != "" {
+			ns = u.DestinationNamespace
 		}
 
 		switch u.DestinationType {
@@ -258,11 +265,13 @@ func (s *state) initWatchesConnectProxy() error {
 			}
 
 			if shouldUseDiscoveryChain {
-				// Watch for discovery chain configuration updates
-				err = s.cache.Notify(s.ctx, cachetype.CompiledDiscoveryChainName, &structs.DiscoveryChainRequest{
-					Datacenter:   dc,
-					QueryOptions: structs.QueryOptions{Token: s.token},
-					Name:         u.DestinationName,
+				// Watch for discovery chain config entry updates.
+				err = s.cache.Notify(s.ctx, cachetype.CompiledDiscoveryChainName, &cachetype.DiscoveryChainRequest{
+					Datacenter:           s.source.Datacenter,
+					QueryOptions:         structs.QueryOptions{Token: s.token},
+					ServiceName:          u.DestinationName,
+					EvaluateInNamespace:  ns,
+					EvaluateInDatacenter: dc,
 				}, "discovery-chain:"+u.Identifier(), s.ch)
 				if err != nil {
 					return err
@@ -475,7 +484,7 @@ func (s *state) handleUpdateConnectProxy(u cache.UpdateEvent, snap *ConfigSnapsh
 		// Not in snapshot currently, no op
 
 	case strings.HasPrefix(u.CorrelationID, "discovery-chain:"):
-		resp, ok := u.Result.(*structs.DiscoveryChainResponse)
+		resp, ok := u.Result.(*cachetype.DiscoveryChainResponse)
 		if !ok {
 			return fmt.Errorf("invalid type for service response: %T", u.Result)
 		}

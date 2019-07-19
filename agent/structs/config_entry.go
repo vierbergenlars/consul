@@ -448,6 +448,42 @@ func ValidateConfigEntryKind(kind string) bool {
 	}
 }
 
+// RelatedConfigEntryQuery is used when requesting info about a set of config
+// entries that are linked in various ways.
+type RelatedConfigEntryQuery struct {
+	ServiceName string
+	Datacenter  string
+
+	QueryOptions
+}
+
+func (c *RelatedConfigEntryQuery) RequestDatacenter() string {
+	return c.Datacenter
+}
+
+func (r *RelatedConfigEntryQuery) CacheInfo() cache.RequestInfo {
+	info := cache.RequestInfo{
+		Token:          r.Token,
+		Datacenter:     r.Datacenter,
+		MinIndex:       r.MinQueryIndex,
+		Timeout:        r.MaxQueryTime,
+		MaxAge:         r.MaxAge,
+		MustRevalidate: r.MustRevalidate,
+	}
+
+	v, err := hashstructure.Hash([]interface{}{
+		r.ServiceName,
+	}, nil)
+	if err == nil {
+		// If there is an error, we don't set the key. A blank key forces
+		// no cache for this request so the request is forwarded directly
+		// to the server.
+		info.Key = strconv.FormatUint(v, 10)
+	}
+
+	return info
+}
+
 // ConfigEntryQuery is used when requesting info about a config entry.
 type ConfigEntryQuery struct {
 	Kind       string

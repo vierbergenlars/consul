@@ -233,14 +233,21 @@ func genVerifyPreparedQueryWatch(expectedName string, expectedDatacenter string)
 	}
 }
 
-func genVerifyDiscoveryChainWatch(expectedName string, expectedDatacenter string) verifyWatchRequest {
+func genVerifyDiscoveryChainWatch(
+	expectedName string,
+	expectedDatacenter string,
+	expectedEvaluateInDatacenter string,
+	expectedEvaluateInNamespace string,
+) verifyWatchRequest {
 	return func(t testing.TB, cacheType string, request cache.Request) {
 		require.Equal(t, cachetype.CompiledDiscoveryChainName, cacheType)
 
-		reqReal, ok := request.(*structs.DiscoveryChainRequest)
+		reqReal, ok := request.(*cachetype.DiscoveryChainRequest)
 		require.True(t, ok)
 		require.Equal(t, expectedDatacenter, reqReal.Datacenter)
-		require.Equal(t, expectedName, reqReal.Name)
+		require.Equal(t, expectedName, reqReal.ServiceName)
+		require.Equal(t, expectedEvaluateInDatacenter, reqReal.EvaluateInDatacenter)
+		require.Equal(t, expectedEvaluateInNamespace, reqReal.EvaluateInNamespace)
 	}
 }
 
@@ -394,23 +401,23 @@ func TestState_WatchesAndUpdates(t *testing.T) {
 						leafWatchID:                     genVerifyLeafWatch("web", "dc1"),
 						intentionsWatchID:               genVerifyIntentionWatch("web", "dc1"),
 						"upstream:prepared_query:query": genVerifyPreparedQueryWatch("query", "dc1"),
-						"discovery-chain:api":           genVerifyDiscoveryChainWatch("api", "dc1"),
+						"discovery-chain:api":           genVerifyDiscoveryChainWatch("api", "dc1", "dc1", "default"),
 						"upstream:" + serviceIDPrefix + "api-failover-remote?dc=dc2": genVerifyGatewayWatch("dc2"),
 						"upstream:" + serviceIDPrefix + "api-failover-local?dc=dc2":  genVerifyGatewayWatch("dc1"),
 						"upstream:" + serviceIDPrefix + "api-failover-direct?dc=dc2": genVerifyServiceWatch("api-failover-direct", "", "dc2", true),
-						"discovery-chain:api-dc2":                                    genVerifyDiscoveryChainWatch("api-dc2", "dc1"),
+						"discovery-chain:api-dc2":                                    genVerifyDiscoveryChainWatch("api-dc2", "dc1", "dc1", "default"),
 					},
 					events: []cache.UpdateEvent{
 						cache.UpdateEvent{
 							CorrelationID: "discovery-chain:api",
-							Result: &structs.DiscoveryChainResponse{
+							Result: &cachetype.DiscoveryChainResponse{
 								Chain: discoverychain.TestCompileConfigEntries(t, "api", "default", "dc1"),
 							},
 							Err: nil,
 						},
 						cache.UpdateEvent{
 							CorrelationID: "discovery-chain:api",
-							Result: &structs.DiscoveryChainResponse{
+							Result: &cachetype.DiscoveryChainResponse{
 								Chain: discoverychain.TestCompileConfigEntries(t, "api-dc2", "default", "dc1",
 									&structs.ServiceResolverConfigEntry{
 										Kind: structs.ServiceResolver,
