@@ -56,7 +56,7 @@ $ cd consul-helm
 $ git checkout v0.1.0
 
 # Run Helm
-$ helm install --dry-run ./
+$ helm install --name consul .
 ```
 
 ~> **Warning:** By default, the chart will install _everything_: a
@@ -413,13 +413,13 @@ Add the `--wait` option to your `helm install` command. This will force Helm to 
 to become ready before it applies the license to your Consul cluster.
 
 ```bash
-$ helm install --wait .
+$ helm install --wait --name consul .
 ```
 
 Once the cluster is up, you can verify the nodes are running Consul Enterprise.
 
 ```bash
-$ kubectl port-forward service/consul-server 8500 &
+$ kubectl port-forward service/consul-consul-server 8500 &
 $ consul license get
 License is valid
 License ID: 1931d1f4-bdfd-6881-f3f5-19349374841f
@@ -443,47 +443,31 @@ consul-server-2                            10.60.2.197:8301  alive   server  1.4
 
 ## Helm Chart Examples
 
-The below values.yaml can be used to set up a single server Consul cluster with a LoadBalancer to allow external access to the UI and API.
+The below `values.yaml` can be used to set up a single server Consul cluster with a `LoadBalancer` to allow external access to the UI and API.
 
-```
+```yaml
 global:
   enabled: true
-  image: "consul:1.4.2"
-  domain: consul
-  datacenter: dc1
 
 server:
-  enabled: true
   replicas: 1
   bootstrapExpect: 1
-  storage: 10Gi
-
-client:
-  enabled: true
-
-dns:
-  enabled: true
 
 ui:
-  enabled: true
   service:
-    enabled: true
     type: LoadBalancer
 ```
 
-The below values.yaml can be used to set up a three server Consul Enterprise cluster with 100GB of storage and automatic Connect injection for annotated pods in the "my-app" namespace.
+The below `values.yaml` can be used to set up a three server Consul Enterprise cluster with 100GB of storage and automatic Connect injection for annotated pods in the "my-app" namespace.
 
 Note, this would require a secret that contains the enterprise license key.
 
-```
+```yaml
 global:
-  enabled: true
-  domain: consul
   image: "hashicorp/consul-enterprise:1.4.2-ent"
   datacenter: dc1
 
 server:
-  enabled: true
   replicas: 3
   bootstrapExpect: 3
   enterpriseLicense:
@@ -491,36 +475,18 @@ server:
     secretKey: "key"
   storage: 100Gi
   connect: true
-  affinity: |
-    podAntiAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        - labelSelector:
-          matchLabels:
-            app: {{ template "consul.name" . }}
-            release: "{{ .Release.Name }}"
-            component: server
-        topologyKey: kubernetes.io/hostname
 
 client:
-  enabled: true
   grpc: true
-
-dns:
-  enabled: true
-
-ui:
-  enabled: true
-  service:
-    enabled: true
-    type: NodePort
 
 connectInject:
   enabled: true
   default: false
   namespaceSelector: "my-app"
-
 ```
 
 ## Customizing the Helm Chart
 
-Consul within Kubernetes is highly configurable and the Helm chart contains dozens of the most commonly used configuration options. If you need to extend the Helm chart with additional options, we recommend using a third-party tool, such as [kustomize](https://github.com/kubernetes-sigs/kustomize) or [ship](https://github.com/replicatedhq/ship).
+Consul within Kubernetes is highly configurable and the Helm chart contains dozens
+of the most commonly used configuration options.
+If you need to extend the Helm chart with additional options, we recommend using a third-party tool, such as [kustomize](https://github.com/kubernetes-sigs/kustomize) or [ship](https://github.com/replicatedhq/ship).
