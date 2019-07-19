@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/consul/agent/cache"
-	"github.com/hashicorp/consul/agent/consul/discoverychain"
+	"github.com/hashicorp/consul/agent/discoverychain"
 	"github.com/hashicorp/consul/agent/structs"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
