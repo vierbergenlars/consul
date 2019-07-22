@@ -9,23 +9,42 @@ function retry {
   shift
   local delay=$1
   shift
-  while true; do
-    "$@" && break || {
-      exit=$?
-      if [[ $n -lt $max ]]; then
-        ((n++))
-        echo "Command failed. Attempt $n/$max:"
-        sleep $delay;
-      else
-        echo "The command has failed after $n attempts." >&2
-        return $exit
+
+  local errtrace=0
+  if grep -q "errtrace" <<< "$SHELLOPTS"
+  then
+    errtrace=1
+    set +E
+  fi
+
+  for ((i=1;i<=$max;i++))
+  do
+    if $@
+    then
+      if test $errtrace -eq 1
+      then
+        set -E
       fi
-    }
+      return 0
+    else
+      echo "Command failed. Attempt $i/$max:"
+      sleep $delay
+    fi
   done
+
+  if test $errtrace -eq 1
+  then
+    set -E
+  fi
+  return 1
 }
 
 function retry_default {
-  retry 5 1 $@
+  set +E
+  ret=0
+  retry 5 1 $@ || ret=1
+  set -E
+  return $ret
 }
 
 function echored {
@@ -56,16 +75,36 @@ function echoblue {
   tput sgr0
 }
 
+function is_set {
+   # Arguments:
+   #   $1 - string value to check its truthiness
+   #
+   # Return:
+   #   0 - is truthy (backwards I know but allows syntax like `if is_set <var>` to work)
+   #   1 - is not truthy
+
+   local val=$(tr '[:upper:]' '[:lower:]' <<< "$1")
+   case $val in
+      1 | t | true | y | yes)
+         return 0
+         ;;
+      *)
+         return 1
+         ;;
+   esac
+}
+
 function get_cert {
   local HOSTPORT=$1
-  openssl s_client -connect $HOSTPORT \
-    -showcerts 2>/dev/null \
-    | openssl x509 -noout -text
+  CERT=$(openssl s_client -connect $HOSTPORT -showcerts )
+  openssl x509 -noout -text <<< "$CERT"
 }
 
 function assert_proxy_presents_cert_uri {
   local HOSTPORT=$1
   local SERVICENAME=$2
+  local DC=${3:-primary}
+
 
   CERT=$(retry_default get_cert $HOSTPORT)
 
@@ -73,7 +112,7 @@ function assert_proxy_presents_cert_uri {
   echo "GOT CERT:"
   echo "$CERT"
 
-  echo "$CERT" | grep -Eo "URI:spiffe://([a-zA-Z0-9-]+).consul/ns/default/dc/dc1/svc/$SERVICENAME"
+  echo "$CERT" | grep -Eo "URI:spiffe://([a-zA-Z0-9-]+).consul/ns/default/dc/${DC}/svc/$SERVICENAME"
 }
 
 function assert_envoy_version {
@@ -115,19 +154,36 @@ function get_envoy_stats_flush_interval {
 function snapshot_envoy_admin {
   local HOSTPORT=$1
   local ENVOY_NAME=$2
+  local DC=${3:-primary}
 
-  docker_wget "http://${HOSTPORT}/config_dump" -q -O - > "./workdir/envoy/${ENVOY_NAME}-config_dump.json"
-  docker_wget "http://${HOSTPORT}/clusters?format=json" -q -O - > "./workdir/envoy/${ENVOY_NAME}-clusters.json"
+
+  docker_wget "$DC" "http://${HOSTPORT}/config_dump" -q -O - > "./workdir/${DC}/envoy/${ENVOY_NAME}-config_dump.json"
+  docker_wget "$DC" "http://${HOSTPORT}/clusters?format=json" -q -O - > "./workdir/${DC}/envoy/${ENVOY_NAME}-clusters.json"
+  docker_wget "$DC" "http://${HOSTPORT}/stats" -q -O - > "./workdir/${DC}/envoy/${ENVOY_NAME}-stats.txt"
+}
+
+function get_all_envoy_metrics {
+  local HOSTPORT=$1
+  curl -s -f $HOSTPORT/stats
+  return $?
+}
+
+function get_envoy_metrics {
+  local HOSTPORT=$1
+  local METRICS=$2
+
+  get_all_envoy_metrics $HOSTPORT | grep "$METRICS"
 }
 
 function get_healthy_upstream_endpoint_count {
   local HOSTPORT=$1
   local CLUSTER_NAME=$2
+
   run retry_default curl -s -f "http://${HOSTPORT}/clusters?format=json"
   [ "$status" -eq 0 ]
   echo "$output" | jq --raw-output "
 .cluster_statuses[]
-| select(.name|startswith(\"${CLUSTER_NAME}.default.dc1.internal.\"))
+| select(.name|startswith(\"${CLUSTER_NAME}\"))
 | .host_statuses[].health_status
 | select(.eds_health_status == \"HEALTHY\")
 | length"
@@ -147,9 +203,40 @@ function assert_upstream_has_healthy_endpoints {
   local HOSTPORT=$1
   local CLUSTER_NAME=$2
   local EXPECT_COUNT=$3
-  run retry 30 1 assert_upstream_has_healthy_endpoints_once $HOSTPORT $CLUSTER_NAME $EXPECT_COUNT
+
+  run retry 40 1 assert_upstream_has_healthy_endpoints_once $HOSTPORT $CLUSTER_NAME $EXPECT_COUNT
   [ "$status" -eq 0 ]
 }
+
+function assert_envoy_metric {
+  set -eEuo pipefail
+  local HOSTPORT=$1
+  local METRIC=$2
+  local EXPECT_COUNT=$3
+
+  METRICS=$(get_envoy_metrics $HOSTPORT "$METRIC")
+
+  if [ -z "${METRICS}" ]
+  then
+    echo "Metric not found" 1>&2
+    return 1
+  fi
+
+  GOT_COUNT=$(awk -F: '{print $2}' <<< "$METRICS" | head -n 1 | tr -d ' ')
+
+  if [ -z "$GOT_COUNT" ]
+  then
+    echo "Couldn't parse metric count" 1>&2
+    return 1
+  fi
+
+  if [ $EXPECT_COUNT -ne $GOT_COUNT ]
+  then
+    echo "$METRIC - expected count: $EXPECT_COUNT, actual count: $GOT_COUNT" 1>&2
+    return 1
+  fi
+}
+
 
 function get_healthy_service_count {
   local SERVICE_NAME=$1
@@ -176,15 +263,22 @@ function assert_service_has_healthy_instances {
 }
 
 function docker_consul {
-  docker run -ti --rm --network container:envoy_consul_1 consul-dev $@
+  local DC=$1
+  shift 1
+  docker run -ti --rm --network container:envoy_consul-${DC}_1 consul-dev "$@"
 }
 
 function docker_wget {
-  docker run -ti --rm --network container:envoy_consul_1 alpine:3.9 wget $@
+  local DC=$1
+  shift 1
+  docker run -ti --rm --network container:envoy_consul-${DC}_1 alpine:3.9 wget "$@"
 }
 
 function must_match_in_statsd_logs {
-  run cat /workdir/statsd/statsd.log
+  local DC=${2:-primary}
+
+  run cat /workdir/${DC}/statsd/statsd.log
+  echo "$output"
   COUNT=$( echo "$output" | grep -Ec $1 )
 
   echo "COUNT of '$1' matches: $COUNT"
@@ -238,13 +332,21 @@ function must_fail_http_connection {
 function gen_envoy_bootstrap {
   SERVICE=$1
   ADMIN_PORT=$2
+  DC=${3:-primary}
+  IS_MGW=${4:-0}
 
-  if output=$(docker_consul connect envoy -bootstrap \
-    -proxy-id $SERVICE-sidecar-proxy \
+  PROXY_ID="$SERVICE"
+  if ! is_set "$IS_MGW"
+  then
+    PROXY_ID="$SERVICE-sidecar-proxy"
+  fi
+
+  if output=$(docker_consul "$DC" connect envoy -bootstrap \
+    -proxy-id $PROXY_ID \
     -admin-bind 0.0.0.0:$ADMIN_PORT 2>&1); then
 
     # All OK, write config to file
-    echo "$output" > workdir/envoy/$SERVICE-bootstrap.json
+    echo "$output" > workdir/${DC}/envoy/$SERVICE-bootstrap.json
   else
     status=$?
     # Command failed, instead of swallowing error (printed on stdout by docker
@@ -252,6 +354,22 @@ function gen_envoy_bootstrap {
     echo "$output"
     return $status
   fi
+}
+
+function read_config_entry {
+  local KIND=$1
+  local NAME=$2
+  local DC=${3:-primary}
+
+  docker_consul "$DC" config read -kind $KIND -name $NAME
+}
+
+function wait_for_config_entry {
+  local KIND=$1
+  local NAME=$2
+  local DC=${3:-primary}
+
+  retry_default "$DC" read_config_entry $KIND $NAME >/dev/null
 }
 
 function get_upstream_fortio_name {
